@@ -14,6 +14,14 @@ console.log(`Gemini API key loaded: ${Boolean(geminiApiKey)}`);
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
+const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const allowedCorsOrigins = new Set([
+  ...DEFAULT_CORS_ORIGINS,
+  ...(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+]);
 const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite";
 const FALLBACK_MODELS = uniqueModels([
   ...parseModelList(process.env.GEMINI_FALLBACK_MODELS),
@@ -41,7 +49,15 @@ const upload = multer({
   },
 });
 
-app.use(cors({ origin: true }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedCorsOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("Origin is not allowed by CORS"));
+  },
+}));
 
 app.get("/api/health", (request, response) => {
   response.json({ ok: true, model: MODEL });
@@ -159,7 +175,7 @@ async function generateWithFallback({ ai, screenshots, screenshotMetadata, conte
       developmentLog("Analysis succeeded", model);
       return { responseFromGemini, model };
     } catch (error) {
-      logGeminiError(model, error, contents);
+      logGeminiError(model, error, requestContents);
       lastError = error;
       modelErrors.push(error);
       const fallbackAvailable = modelIndex < models.length - 1;
