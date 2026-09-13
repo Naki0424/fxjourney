@@ -5,6 +5,10 @@ import multer from "multer";
 import { fileURLToPath } from "node:url";
 import { GoogleGenAI } from "@google/genai";
 import { analysisResponseSchema } from "./analysisSchema.js";
+import { openDatabase } from "./db/index.js";
+import { runMigrations } from "./db/migrate.js";
+import { createPersistenceRouter } from "./persistence/routes.js";
+import { bootstrapLocalInstallation } from "./persistence/services/bootstrapService.js";
 
 const envPath = fileURLToPath(new URL("./.env", import.meta.url));
 dotenv.config({ path: envPath, override: true, quiet: true });
@@ -36,6 +40,9 @@ const MAIN_TREND_VALUES = new Set(["BULLISH", "BEARISH", "SIDEWAYS", "TRANSITION
 const TREND_STRENGTH_VALUES = new Set(["WEAK", "MODERATE", "STRONG"]);
 const RECOMMENDATION_STYLE_VALUES = new Set(["SCALP", "INTRADAY", "SWING", "AI_OPPORTUNITY"]);
 const RECOMMENDATION_ACTION_VALUES = new Set(["BUY", "SELL", "WAIT", "NO_TRADE"]);
+const persistenceDatabase = openDatabase();
+runMigrations(persistenceDatabase);
+const localPersistenceContext = bootstrapLocalInstallation({ database: persistenceDatabase });
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -57,6 +64,11 @@ app.use(cors({
     }
     callback(new Error("Origin is not allowed by CORS"));
   },
+}));
+app.use(express.json({ limit: "1mb" }));
+app.use("/api", createPersistenceRouter({
+  database: persistenceDatabase,
+  getContext: () => localPersistenceContext,
 }));
 
 app.get("/api/health", (request, response) => {
@@ -615,6 +627,12 @@ function isFallbackEligibleGeminiError(error) {
 }
 
 function mapError(error) {
+  if (error?.scope === "persistence") {
+    if ([400, 404, 409].includes(Number(error.statusCode))) {
+      return { status: Number(error.statusCode), message: error.message };
+    }
+    return { status: 500, message: "Persistence request failed. Please try again." };
+  }
   const status = getErrorStatus(error);
   const message = getErrorMessage(error);
   if (status === 429 || /quota|rate limit|resource exhausted/i.test(message)) {
@@ -647,6 +665,10 @@ app.use((error, request, response, next) => {
   }
   if (error?.message === "Please upload a PNG, JPG, or JPEG screenshot.") {
     response.status(400).json({ error: error.message });
+    return;
+  }
+  if (error instanceof SyntaxError && error.status === 400 && Object.prototype.hasOwnProperty.call(error, "body")) {
+    response.status(400).json({ error: "Request body must be valid JSON." });
     return;
   }
   const mapped = mapError(error);
