@@ -1,7 +1,11 @@
 import React from "react";
+import { useApplication } from "../../context/ApplicationContext";
 import { navItems } from "../../data/mockData";
 import { navigate } from "../../lib/navigation";
 export default function Sidebar({ path, open }) {
+  const { status, userProfile } = useApplication();
+  const profileName = userProfile?.displayName || (status === "loading" ? "Loading profile..." : "Profile unavailable");
+
   return (
     <aside className={"sidebar " + (open ? "open" : "")}>
       <div className="brand">
@@ -37,7 +41,7 @@ export default function Sidebar({ path, open }) {
         <div className="profile">
           <div className="avatar" />
           <div>
-            John Trader
+            {profileName}
             <br />
             <small>Pro Account</small>
           </div>

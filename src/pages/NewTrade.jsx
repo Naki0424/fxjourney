@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from "react";
 import Button from "../components/common/Button";
 import Card from "../components/common/Card";
 import PageHeader from "../components/common/PageHeader";
+import { useApplication } from "../context/ApplicationContext";
 import { categories } from "../data/mockData";
 import { navigate } from "../lib/navigation";
 import { calculateRR } from "../utils/rr";
@@ -13,7 +14,7 @@ const initialTrade = {
   dateTime: "May 18, 2024 10:20 AM",
   session: "London",
   timeframe: "15m",
-  account: "Main Account",
+  account: "",
   status: "Win",
   setup: "Breakout",
   market: "Trending",
@@ -40,14 +41,21 @@ function FormInput({ label, ...props }) {
   );
 }
 
-function SelectField({ label, value, options, onChange }) {
+function SelectField({ label, value, options, onChange, disabled = false }) {
   return (
     <div className="form-field">
       <label>{label}</label>
-      <select value={value} onChange={onChange}>
-        {options.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
+      <select value={value} onChange={onChange} disabled={disabled}>
+        {options.map((option) => {
+          const normalized = typeof option === "string"
+            ? { value: option, label: option }
+            : option;
+          return (
+            <option key={normalized.value} value={normalized.value}>
+              {normalized.label}
+            </option>
+          );
+        })}
       </select>
     </div>
   );
@@ -97,8 +105,14 @@ function SegmentControl({ options, value, onChange, tone = "green" }) {
 }
 
 function TradeInfoPanel({ trade, setTrade }) {
+  const { accounts, selectedAccountId, setSelectedAccountId } = useApplication();
   const update = (field, value) =>
     setTrade((current) => ({ ...current, [field]: value }));
+  const accountOptions = accounts.length
+    ? accounts.map((account) => ({ value: account.id, label: account.name }))
+    : [{ value: "", label: "No accounts available" }];
+  const accountValue = selectedAccountId || trade.account || "";
+
   return (
     <Card className="trade-info-panel">
       <div className="trade-info-row top">
@@ -148,9 +162,13 @@ function TradeInfoPanel({ trade, setTrade }) {
       <div className="trade-info-row bottom">
         <SelectField
           label="Account"
-          value={trade.account}
-          options={["Main Account", "Demo Account"]}
-          onChange={(event) => update("account", event.target.value)}
+          value={accountValue}
+          options={accountOptions}
+          disabled={!accounts.length}
+          onChange={(event) => {
+            setSelectedAccountId(event.target.value || null);
+            update("account", event.target.value);
+          }}
         />
         <div className="form-field">
           <label>Status (Auto)</label>

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Button from "../components/common/Button";
 import Card from "../components/common/Card";
 import PageHeader from "../components/common/PageHeader";
+import { useApplication } from "../context/ApplicationContext";
 import { settingsData } from "../data/mockData";
 
 const settingsTabs = [
@@ -26,7 +27,11 @@ function SettingsCard({ title, children, className = "" }) {
 }
 
 function ProfileCard() {
-  const [profile, setProfile] = useState(settingsData.profile);
+  const { userProfile } = useApplication();
+  const [profile, setProfile] = useState(() => ({
+    ...settingsData.profile,
+    fullName: userProfile?.displayName || "",
+  }));
   const [saved, setSaved] = useState(false);
   const updateField = (field, value) => {
     setProfile((current) => ({ ...current, [field]: value }));

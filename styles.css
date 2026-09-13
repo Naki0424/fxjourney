@@ -140,6 +140,45 @@ button {
   padding: 28px 28px 26px;
   box-shadow: 0 0 20px #dce5f2;
 }
+.startup-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 420px;
+  padding: 32px;
+  text-align: center;
+}
+.startup-state-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 14px;
+  border: 1px solid #cfe0ff;
+  border-radius: 50%;
+  color: var(--blue);
+  font-size: 24px;
+  line-height: 1;
+  background: #f2f6ff;
+}
+.startup-state h1 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 22px;
+}
+.startup-state p {
+  max-width: 420px;
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+.startup-state-error .startup-state-icon {
+  border-color: #f4c7c7;
+  color: #c52f36;
+  background: #fff5f5;
+}
+.startup-state-error p {
+  color: #7c3d45;
+}
 .topline {
   display: flex;
   justify-content: space-between;
