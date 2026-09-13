@@ -1,0 +1,33 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+server/.env
+
+# SQLite / local databases
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db-*
+
+# Local app data / media
+server/data/
+server/uploads/
+media/
+uploads/
+storage/
+backups/
+
+# Backup files
+*.bak
+*.backup
+
+# Secret/token material
+secrets/
+*.secret
+*.token
+*.pem
+*.key
