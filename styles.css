@@ -1790,6 +1790,46 @@ button {
 .trades-table tbody tr {
   cursor: pointer;
 }
+.trade-data-state {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 230px;
+  padding: 28px;
+  text-align: center;
+}
+.trade-data-state h2 {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 17px;
+}
+.trade-data-state p {
+  max-width: 420px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.trade-form-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #dce8ff;
+  border-radius: 7px;
+  background: #f4f8ff;
+  color: #263856;
+  font-size: 12px;
+}
+.trade-form-message.error {
+  border-color: #f3caca;
+  background: #fff6f6;
+  color: #913c44;
+}
+.trade-form-message .btn {
+  margin-left: auto;
+  padding: 6px 10px;
+}
 @media (max-width: 1100px) {
   .trades-control-row {
     grid-template-columns: 1fr;
@@ -2287,6 +2327,16 @@ button {
 .icon-input span:last-child {
   margin-left: auto;
   font-size: 15px;
+}
+.date-input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: #172238;
+  background: transparent;
+  font-size: 10px;
 }
 .pair-select > span:nth-child(2) {
   flex: 1;

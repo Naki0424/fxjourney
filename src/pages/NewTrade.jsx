@@ -1,17 +1,19 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Button from "../components/common/Button";
 import Card from "../components/common/Card";
 import PageHeader from "../components/common/PageHeader";
 import { useApplication } from "../context/ApplicationContext";
 import { categories } from "../data/mockData";
 import { navigate } from "../lib/navigation";
+import { tradeService } from "../services/tradeService";
+import { formToTradePayload, tradeToForm, validateTradeForm } from "../utils/tradeData";
 import { calculateRR } from "../utils/rr";
 
 const initialTrade = {
   pair: "EURUSD",
   direction: "LONG",
   lots: "0.50",
-  dateTime: "May 18, 2024 10:20 AM",
+  dateTime: "2024-05-18T10:20",
   session: "London",
   timeframe: "15m",
   account: "",
@@ -19,17 +21,31 @@ const initialTrade = {
   setup: "Breakout",
   market: "Trending",
   tags: ["Breakout", "London", "High Probability"],
-  bias: "Bullish",
+  bias: "Bullish　↗",
   entryType: "Market Order",
   entry: "1.08520",
   stopLoss: "1.08370",
   takeProfit: "1.08761",
   exitPrice: "1.08761",
-  riskPips: "15",
-  rewardPips: "24.1",
+  riskPips: "",
+  rewardPips: "",
   positionSize: "0.50",
   riskPercent: "0.50",
   duration: "1h 15m",
+  tradeReason: "",
+  expected: "",
+  invalidation: "",
+  emotionBefore: "Confident",
+  emotionDuring: "Patient",
+  emotionAfter: "Happy",
+  emotionBeforeNote: "Feeling prepared and confident in my analysis.",
+  emotionDuringNote: "Waiting for price to reach take profit.",
+  emotionAfterNote: "Great execution and perfect result.",
+  notes: "",
+  lessonsLearned: "",
+  improvements: "",
+  rating: 0,
+  closedAt: "2024-05-18T11:35",
 };
 
 function FormInput({ label, ...props }) {
@@ -61,24 +77,27 @@ function SelectField({ label, value, options, onChange, disabled = false }) {
   );
 }
 
-function DateField({ label, value }) {
+function DateField({ label, value, onChange }) {
   return (
     <div className="form-field">
       <label>{label}</label>
-      <div className="icon-input"><span>▣</span>{value}<span>⌄</span></div>
+      <div className="icon-input">
+        <span>▣</span>
+        {onChange ? <input className="date-input" type="datetime-local" value={value} onChange={onChange} /> : value}
+        <span>⌄</span>
+      </div>
     </div>
   );
 }
 
-function TextAreaField({ label, placeholder, maxLength = 500 }) {
-  const [value, setValue] = useState("");
+function TextAreaField({ label, placeholder, value, onChange, maxLength = 500 }) {
   return (
     <div className="form-field textarea-field">
       <label>{label}</label>
       <textarea
         value={value}
         maxLength={maxLength}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
       />
       <small>
@@ -144,8 +163,12 @@ function TradeInfoPanel({ trade, setTrade }) {
             </button>
           </div>
         </div>
-        <FormInput label="Lots" value={trade.lots} readOnly />
-        <DateField label="Date & Time" value={trade.dateTime} />
+        <FormInput
+          label="Lots"
+          value={trade.lots}
+          onChange={(event) => update("lots", event.target.value)}
+        />
+        <DateField label="Date & Time" value={trade.dateTime} onChange={(event) => update("dateTime", event.target.value)} />
         <SelectField
           label="Session"
           value={trade.session}
@@ -173,7 +196,7 @@ function TradeInfoPanel({ trade, setTrade }) {
         <div className="form-field">
           <label>Status (Auto)</label>
           <SegmentControl
-            options={["Win", "Loss", "Breakeven"]}
+            options={["Win", "Loss", "Breakeven", "Unresolved"]}
             value={trade.status}
             onChange={(value) => update("status", value)}
           />
@@ -229,29 +252,35 @@ function TradeInfoPanel({ trade, setTrade }) {
   );
 }
 
-function TradePlan() {
-  const [bias, setBias] = useState("Bullish　↗");
+function TradePlan({ trade, setTrade }) {
+  const update = (field, value) => setTrade((current) => ({ ...current, [field]: value }));
   return (
     <Card title="◎ Trade Plan">
       <div className="form-field">
         <label>Bias</label>
         <SegmentControl
           options={["Bullish　↗", "Bearish　↗", "Neutral"]}
-          value={bias}
-          onChange={setBias}
+          value={trade.bias}
+          onChange={(value) => update("bias", value)}
         />
       </div>
       <TextAreaField
         label="Reason for the Trade"
         placeholder="Why did you take this trade?"
+        value={trade.tradeReason}
+        onChange={(value) => update("tradeReason", value)}
       />
       <TextAreaField
         label="What I Expected"
         placeholder="What was your expectation for this trade?"
+        value={trade.expected}
+        onChange={(value) => update("expected", value)}
       />
       <TextAreaField
         label="Invalidation / Stop Reason"
         placeholder="What would invalidate your idea?"
+        value={trade.invalidation}
+        onChange={(value) => update("invalidation", value)}
       />
     </Card>
   );
@@ -284,7 +313,7 @@ function EntryExit({ trade, setTrade }) {
           value={trade.entry}
           onChange={(event) => update("entry", event.target.value)}
         />
-        <DateField label="Entry Time" value={trade.dateTime} />
+        <DateField label="Entry Time" value={trade.dateTime} onChange={(event) => update("dateTime", event.target.value)} />
         <FormInput
           label="Stop Loss"
           value={trade.stopLoss}
@@ -302,8 +331,8 @@ function EntryExit({ trade, setTrade }) {
           value={trade.exitPrice}
           onChange={(event) => update("exitPrice", event.target.value)}
         />
-        <FormInput label="Risk (pips)" value={trade.riskPips} readOnly />
-        <FormInput label="Reward (pips)" value={trade.rewardPips} readOnly />
+        <FormInput label="Risk (pips)" value={trade.riskPips || "N/A"} readOnly />
+        <FormInput label="Reward (pips)" value={trade.rewardPips || "N/A"} readOnly />
         <FormInput
           label="R:R"
           value={rr ? rr.ratio.toFixed(2) : "—"}
@@ -311,24 +340,24 @@ function EntryExit({ trade, setTrade }) {
         />
         <FormInput
           label="Position Size (Lots)"
-          value={trade.positionSize}
+          value={trade.lots}
           readOnly
         />
         <FormInput
           label="Risk % of Account"
-          value={`${trade.riskPercent} %`}
-          readOnly
+          value={trade.riskPercent}
+          onChange={(event) => update("riskPercent", event.target.value)}
         />
         <FormInput label="Duration" value={trade.duration} readOnly />
       </div>
       <div className="calculation-strip">
         <span>
-          Risk: <b className="negative">$100.00</b>
-          <small>0.50%</small>
+          Risk: <b className="negative">N/A</b>
+          <small>Persisted after execution</small>
         </span>
         <span>
-          Reward: <b className="positive">$160.00</b>
-          <small>0.80%</small>
+          Reward: <b className="positive">N/A</b>
+          <small>Persisted after execution</small>
         </span>
         <span>
           R:R: <b>{rr ? rr.ratio.toFixed(2) : "—"}</b>
@@ -398,34 +427,24 @@ function ChartScreenshot() {
   );
 }
 
-function Emotions() {
+function Emotions({ trade }) {
   const emotions = [
-    [
-      "Before Trade",
-      "Confident",
-      "Feeling prepared and confident in my analysis.",
-      "green",
-    ],
-    [
-      "During Trade",
-      "Patient",
-      "Waiting for price to reach take profit.",
-      "orange",
-    ],
-    ["After Trade", "Happy", "Great execution and perfect result.", "green"],
+    ["Before Trade", "emotionBefore", "emotionBeforeNote", "green"],
+    ["During Trade", "emotionDuring", "emotionDuringNote", "orange"],
+    ["After Trade", "emotionAfter", "emotionAfterNote", "green"],
   ];
   return (
     <Card title="☻ Emotions　ⓘ">
       <div className="emotion-grid">
-        {emotions.map(([label, value, helper, tone]) => (
+        {emotions.map(([label, valueField, noteField, tone]) => (
           <div className="emotion-item" key={label}>
             <label>{label}</label>
             <div className={`emotion-select ${tone}`}>
-              ☺　{value}
+              ☺　{trade[valueField]}
               <span>⌄</span>
             </div>
-            <p>{helper}</p>
-            <small>0 / 200</small>
+            <p>{trade[noteField]}</p>
+            <small>{trade[noteField].length} / 200</small>
           </div>
         ))}
       </div>
@@ -433,12 +452,12 @@ function Emotions() {
   );
 }
 
-function Notes() {
+function Notes({ trade, setTrade }) {
   return (
     <Card title="▤ Notes">
       <div className="large-textarea">
-        <textarea placeholder="Additional notes about this trade..." />
-        <small>0 / 1000</small>
+        <textarea value={trade.notes} onChange={(event) => setTrade((current) => ({ ...current, notes: event.target.value }))} placeholder="Additional notes about this trade..." />
+        <small>{trade.notes.length} / 1000</small>
       </div>
     </Card>
   );
@@ -471,7 +490,7 @@ function Attachments() {
   );
 }
 
-function ReviewText({ title, icon, placeholder }) {
+function ReviewText({ title, icon, placeholder, value, onChange }) {
   return (
     <Card title={`${icon} ${title}`}>
       <label className="review-helper">
@@ -480,15 +499,15 @@ function ReviewText({ title, icon, placeholder }) {
           : "How will you improve for your next similar trade?"}
       </label>
       <div className="large-textarea">
-        <textarea placeholder={placeholder} />
-        <small>0 / 1000</small>
+        <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+        <small>{value.length} / 1000</small>
       </div>
     </Card>
   );
 }
 
-function TradeRating() {
-  const [rating, setRating] = useState(0);
+function TradeRating({ trade, setTrade }) {
+  const rating = trade.rating;
   return (
     <Card title="☆ Trade Rating">
       <p>How well did you execute your plan?</p>
@@ -497,7 +516,7 @@ function TradeRating() {
           <button
             key={star}
             className={star <= rating ? "selected" : ""}
-            onClick={() => setRating(star)}
+            onClick={() => setTrade((current) => ({ ...current, rating: star }))}
           >
             ☆
           </button>
@@ -508,43 +527,121 @@ function TradeRating() {
   );
 }
 
+function editTradeId() {
+  return new URLSearchParams(window.location.search).get("edit");
+}
+
+function saveErrorMessage(error) {
+  if (error?.status === 409) return "This trade was changed elsewhere. Reload it before saving your changes.";
+  return error?.message || "The trade could not be saved. Please try again.";
+}
+
 export default function NewTrade() {
+  const { accounts, selectedAccountId, setSelectedAccountId } = useApplication();
+  const editId = useMemo(() => editTradeId(), []);
   const [trade, setTrade] = useState(initialTrade);
-  const handleCancel = () => navigate("/trades");
+  const [loading, setLoading] = useState(Boolean(editId));
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+
+  useEffect(() => {
+    if (!editId) return undefined;
+    let active = true;
+    tradeService.get(editId)
+      .then((result) => {
+        if (!active) return;
+        const persistedTrade = result?.trade;
+        if (!persistedTrade) throw new Error("Trade not found.");
+        setTrade(tradeToForm(persistedTrade));
+        if (accounts.some((account) => account.id === persistedTrade.accountId)) {
+          setSelectedAccountId(persistedTrade.accountId);
+        }
+        setLoading(false);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLoadError(error);
+        setLoading(false);
+      });
+    return () => { active = false; };
+  }, [accounts, editId, setSelectedAccountId]);
+
+  const handleCancel = () => navigate(editId ? `/trade-details/${encodeURIComponent(editId)}` : "/trades");
+  const handleSave = async (draft) => {
+    const accountId = selectedAccountId || trade.account;
+    const validationError = validateTradeForm(trade, accountId);
+    if (validationError) {
+      setSaveError(new Error(validationError));
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const payload = formToTradePayload(trade, accountId, { draft });
+      if (editId) {
+        await tradeService.update(editId, payload, trade.version);
+      } else {
+        await tradeService.create(payload);
+      }
+      navigate("/trades");
+    } catch (error) {
+      setSaveError(error);
+      setSaving(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
-        title="New Trade"
+        title={editId ? "Edit Trade" : "New Trade"}
         sub="Record a new trade to track your performance and improve."
       >
-        <Button onClick={handleCancel}>Cancel</Button>
-        <Button>▱ Save as Draft</Button>
-        <Button primary>✓ Save Trade</Button>
+        <Button onClick={handleCancel} disabled={saving}>Cancel</Button>
+        <Button onClick={() => handleSave(true)} disabled={saving || loading || !accounts.length}>▱ Save as Draft</Button>
+        <Button primary onClick={() => handleSave(false)} disabled={saving || loading || !accounts.length}>✓ Save Trade</Button>
       </PageHeader>
-      <TradeInfoPanel trade={trade} setTrade={setTrade} />
-      <div className="new-trade-main-row">
-        <TradePlan />
-        <EntryExit trade={trade} setTrade={setTrade} />
-        <ChartScreenshot />
-      </div>
-      <div className="new-trade-second-row">
-        <Emotions />
-        <Notes />
-        <Attachments />
-      </div>
-      <div className="new-trade-review-row">
-        <ReviewText
-          title="Lessons Learned"
-          icon="♧"
-          placeholder="What went well? What could be improved?"
-        />
-        <ReviewText
-          title="What I'll Do Differently Next Time"
-          icon="◎"
-          placeholder="What would you do differently?"
-        />
-        <TradeRating />
-      </div>
+      {loadError && (
+        <div className="trade-form-message error" role="alert">
+          {saveErrorMessage(loadError)} <Button onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      )}
+      {saveError && <div className="trade-form-message error" role="alert">{saveErrorMessage(saveError)}</div>}
+      {!accounts.length && <div className="trade-form-message">No active account is available. Create an account before saving a trade.</div>}
+      {loading ? (
+        <div className="trade-data-state"><h2>Loading trade</h2><p>Reading the persisted trade before editing.</p></div>
+      ) : loadError ? null : (
+        <>
+          <TradeInfoPanel trade={trade} setTrade={setTrade} />
+          <div className="new-trade-main-row">
+            <TradePlan trade={trade} setTrade={setTrade} />
+            <EntryExit trade={trade} setTrade={setTrade} />
+            <ChartScreenshot />
+          </div>
+          <div className="new-trade-second-row">
+            <Emotions trade={trade} />
+            <Notes trade={trade} setTrade={setTrade} />
+            <Attachments />
+          </div>
+          <div className="new-trade-review-row">
+            <ReviewText
+              title="Lessons Learned"
+              icon="♧"
+              placeholder="What went well? What could be improved?"
+              value={trade.lessonsLearned}
+              onChange={(value) => setTrade((current) => ({ ...current, lessonsLearned: value }))}
+            />
+            <ReviewText
+              title="What I'll Do Differently Next Time"
+              icon="◎"
+              placeholder="What would you do differently?"
+              value={trade.improvements}
+              onChange={(value) => setTrade((current) => ({ ...current, improvements: value }))}
+            />
+            <TradeRating trade={trade} setTrade={setTrade} />
+          </div>
+        </>
+      )}
     </>
   );
 }

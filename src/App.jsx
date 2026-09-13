@@ -47,7 +47,7 @@ export default function App() {
   const path = usePath();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { status, error, refresh } = useApplication();
-  const route = path.slice(1) || "dashboard";
+  const route = path.split("?")[0].slice(1).split("/")[0] || "dashboard";
   const pages = {
     dashboard: <Dashboard />,
     trades: <Trades />,
