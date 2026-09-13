@@ -102,6 +102,21 @@ export function timestampValue(value, field, { nullable = true } = {}) {
   return new Date(value).toISOString();
 }
 
+export function dateOnlyValue(value, field, { nullable = true } = {}) {
+  if (value === undefined || value === null || value === "") {
+    if (nullable) return null;
+    throw badRequest(`${field} is required.`);
+  }
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw badRequest(`${field} must be a valid YYYY-MM-DD date.`);
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw badRequest(`${field} must be a valid YYYY-MM-DD date.`);
+  }
+  return value;
+}
+
 export function jsonValue(value, field, { nullable = true } = {}) {
   if (value === undefined || value === null) {
     if (nullable) return null;
