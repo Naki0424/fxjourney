@@ -10,6 +10,7 @@ import { createJournalService } from "./services/journalService.js";
 import { createMediaService } from "./services/mediaService.js";
 import { createReflectionService } from "./services/reflectionService.js";
 import { createSyncService } from "./syncService.js";
+import { createSyncTransportRouter } from "./syncTransport.js";
 
 export function createPersistenceRouter({ database, getContext, mediaStorage, uploadMiddleware }) {
   const router = express.Router();
@@ -23,6 +24,7 @@ export function createPersistenceRouter({ database, getContext, mediaStorage, up
   const goalService = createGoalService({ database, getContext });
   const habitService = createHabitService({ database, getContext });
   const reflectionService = createReflectionService({ database, getContext });
+  router.use("/sync", createSyncTransportRouter({ database, getContext, syncService }));
 
   router.get("/bootstrap", (request, response) => {
     response.json(getContext().getBootstrap());

@@ -81,7 +81,7 @@ async function runVerification() {
   try {
     database = openDatabase({ filename: databasePath, wal: false });
     const migration = runMigrations(database);
-    assert.deepEqual(migration.applied, ["001", "002"]);
+    assert.deepEqual(migration.applied, ["001", "002", "003"]);
 
     const firstContext = bootstrapLocalInstallation({ database, identityPath });
     const secondContext = bootstrapLocalInstallation({ database, identityPath });

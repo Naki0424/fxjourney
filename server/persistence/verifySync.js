@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -33,7 +34,7 @@ function openNode(rootDirectory, userId, deviceId, peerDeviceId, label) {
   fs.mkdirSync(nodeDirectory, { recursive: true });
   const databasePath = path.join(nodeDirectory, "node.db");
   const identityPath = path.join(nodeDirectory, "local-identity.json");
-  writeLocalIdentity({ userId, deviceId }, identityPath);
+  if (!fs.existsSync(identityPath)) writeLocalIdentity({ userId, deviceId }, identityPath);
   const database = openDatabase({ filename: databasePath, wal: false });
   runMigrations(database);
   const context = bootstrapLocalInstallation({ database, identityPath });
@@ -54,7 +55,9 @@ function openNode(rootDirectory, userId, deviceId, peerDeviceId, label) {
 }
 
 function closeNode(node) {
-  if (node?.database?.open) closeDatabase(node.database);
+  if (node?.database?.open) {
+    closeDatabase(node.database);
+  }
 }
 
 function accountInput(name) {
@@ -214,18 +217,6 @@ function runVerification() {
     assert.equal(nodeB.syncService.getSyncState(deviceB, deviceA).lastReceivedRemoteSeq, 11);
     assertSameEntity(nodeA, nodeB, "trades", dependencyTrade.id, "Dependency-ordered Trade did not converge.");
 
-    const cursorBeforeRestart = nodeB.syncService.getSyncState(deviceB, deviceA).lastReceivedRemoteSeq;
-    const identityBeforeRestart = { ...nodeB.context };
-    closeNode(nodeB);
-    nodeB = openNode(temporaryDirectory, userId, deviceB, deviceA, "node-b");
-    assert.equal(nodeB.context.userId, identityBeforeRestart.userId, "Restart changed the user identity.");
-    assert.equal(nodeB.context.deviceId, identityBeforeRestart.deviceId, "Restart changed the device identity.");
-    assert.equal(nodeB.syncService.getSyncState(deviceB, deviceA).lastReceivedRemoteSeq, cursorBeforeRestart, "Remote cursor was not durable across restart.");
-    const postRestartTrade = nodeB.tradeService.create(tradeInput(account.id, "CHFJPY"));
-    const postRestartEvent = eventFor(nodeB, deviceB, 5);
-    assert.equal(postRestartEvent.entityId, postRestartTrade.id);
-    assert.equal(apply(nodeA, deviceB, [postRestartEvent])[0].status, "APPLIED", "Post-restart local origin sequence was not usable.");
-
     const accountCountBeforeAtomicFailure = count(nodeA.database, "accounts");
     const changeCountBeforeAtomicFailure = count(nodeA.database, "sync_changes");
     const sequenceBeforeAtomicFailure = row(nodeA.database, "SELECT nextOriginSeq FROM sync_device_sequences WHERE deviceId = ?", deviceA).nextOriginSeq;
@@ -282,7 +273,7 @@ function runVerification() {
     assert.equal(count(nodeB.database, "sync_changes"), countsBeforeRejection.changes);
     assert.equal(nodeB.syncService.getSyncState(deviceB, deviceA).lastReceivedRemoteSeq, 14, "Rejected events advanced the cursor.");
 
-    for (const [node, originDeviceId, expectedCount] of [[nodeA, deviceA, 15], [nodeB, deviceB, 5]]) {
+    for (const [node, originDeviceId, expectedCount] of [[nodeA, deviceA, 15], [nodeB, deviceB, 4]]) {
       const sequences = node.database.prepare(
         "SELECT originSeq FROM sync_changes WHERE originDeviceId = ? ORDER BY originSeq",
       ).pluck().all(originDeviceId);
@@ -291,7 +282,20 @@ function runVerification() {
 
     const states = nodeB.database.prepare("SELECT localDeviceId, remoteDeviceId, lastReceivedRemoteSeq, status FROM sync_state ORDER BY localDeviceId, remoteDeviceId").all();
     assert(states.some((state) => state.localDeviceId === deviceB && state.remoteDeviceId === deviceA && state.lastReceivedRemoteSeq === 14 && state.status === "IDLE"));
-    assert.equal(row(nodeB.database, "SELECT COUNT(*) AS count FROM sync_changes WHERE originDeviceId = ?", deviceB).count, 5, "Unexpected local event count after restart.");
+    assert.equal(row(nodeB.database, "SELECT COUNT(*) AS count FROM sync_changes WHERE originDeviceId = ?", deviceB).count, 4, "Unexpected local event count before restart.");
+
+    const cursorBeforeRestart = nodeB.syncService.getSyncState(deviceB, deviceA).lastReceivedRemoteSeq;
+    const identityBeforeRestart = { userId: nodeB.context.userId, deviceId: nodeB.context.deviceId, fingerprint: nodeB.context.auth.fingerprint };
+    closeNode(nodeB);
+    nodeB = openNode(temporaryDirectory, userId, deviceB, deviceA, "node-b");
+    assert.equal(nodeB.context.userId, identityBeforeRestart.userId, "Restart changed the user identity.");
+    assert.equal(nodeB.context.deviceId, identityBeforeRestart.deviceId, "Restart changed the device identity.");
+    assert.equal(nodeB.context.auth.fingerprint, identityBeforeRestart.fingerprint, "Restart changed the device credentials.");
+    assert.equal(nodeB.syncService.getSyncState(deviceB, deviceA).lastReceivedRemoteSeq, cursorBeforeRestart, "Remote cursor was not durable across restart.");
+    const postRestartTrade = nodeB.tradeService.create(tradeInput(account.id, "CHFJPY"));
+    const postRestartEvent = eventFor(nodeB, deviceB, 5);
+    assert.equal(postRestartEvent.entityId, postRestartTrade.id);
+    assert.equal(apply(nodeA, deviceB, [postRestartEvent])[0].status, "APPLIED", "Post-restart local origin sequence was not usable.");
 
     return {
       databasePaths: [nodeA.databasePath, nodeB.databasePath],
@@ -304,7 +308,28 @@ function runVerification() {
   } finally {
     closeNode(nodeA);
     closeNode(nodeB);
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    cleanupTemporaryDirectory(temporaryDirectory);
+  }
+}
+
+function cleanupTemporaryDirectory(directory) {
+  try {
+    fs.rmSync(directory, { recursive: true, force: true });
+  } catch {
+    const cleanupScript = [
+      "import fs from 'node:fs';",
+      "const target = process.argv[1];",
+      "for (let attempt = 0; attempt < 40; attempt += 1) {",
+      "  try { fs.rmSync(target, { recursive: true, force: true }); process.exit(0); }",
+      "  catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250); }",
+      "}",
+      "process.exit(1);",
+    ].join(" ");
+    const child = spawn(process.execPath, ["--input-type=module", "-e", cleanupScript, directory], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
   }
 }
 

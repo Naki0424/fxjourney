@@ -15,8 +15,9 @@ export function findFirstActiveDevice(database) {
 export function insertDevice(database, device) {
   database.prepare(`
     INSERT INTO devices (
-      id, userId, name, platform, appVersion, createdAt, lastSeenAt, retiredAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      id, userId, name, platform, appVersion, createdAt, lastSeenAt, retiredAt,
+      authAlgorithm, authPublicKey, authKeyFingerprint, trustedAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     device.id,
     device.userId,
@@ -26,8 +27,27 @@ export function insertDevice(database, device) {
     device.createdAt,
     device.lastSeenAt,
     device.retiredAt,
+    device.authAlgorithm ?? null,
+    device.authPublicKey ?? null,
+    device.authKeyFingerprint ?? null,
+    device.trustedAt ?? null,
   );
   return findDeviceById(database, device.id);
+}
+
+export function updateDeviceAuthentication(database, deviceId, authentication) {
+  database.prepare(`
+    UPDATE devices SET
+      authAlgorithm = ?, authPublicKey = ?, authKeyFingerprint = ?, trustedAt = COALESCE(trustedAt, ?)
+    WHERE id = ?
+  `).run(
+    authentication.algorithm,
+    authentication.publicKeySpki,
+    authentication.fingerprint,
+    authentication.trustedAt,
+    deviceId,
+  );
+  return findDeviceById(database, deviceId);
 }
 
 export function touchDevice(database, id, lastSeenAt) {

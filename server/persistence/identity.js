@@ -16,7 +16,11 @@ export function readLocalIdentity(filename = process.env.FXJOURNEY_IDENTITY_PATH
   try {
     const identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
     if (!isUuid(identity?.deviceId) || !isUuid(identity?.userId)) return null;
-    return { deviceId: identity.deviceId, userId: identity.userId };
+    return {
+      deviceId: identity.deviceId,
+      userId: identity.userId,
+      auth: identity.auth && typeof identity.auth === "object" ? identity.auth : null,
+    };
   } catch {
     return null;
   }
