@@ -1,6 +1,6 @@
 import { normalizeAnalysisResult } from "../utils/normalizeAnalysisResult";
 
-export async function analyzeScreenshot({ file, screenshots = [], context = {} }) {
+export async function analyzeScreenshot({ file, screenshots = [], context = {}, sessionId = null }) {
   const screenshotEntries = screenshots.length
     ? screenshots
     : file?.file
@@ -20,6 +20,7 @@ export async function analyzeScreenshot({ file, screenshots = [], context = {} }
     timeframe: entry.timeframe,
   }))));
   formData.append("context", JSON.stringify(context ?? {}));
+  if (sessionId) formData.append("sessionId", sessionId);
 
   let response;
   try {
@@ -58,7 +59,12 @@ export async function analyzeScreenshot({ file, screenshots = [], context = {} }
   if (import.meta.env.DEV) {
     console.debug("[analyzer][dev] Normalized result", normalizedResult);
   }
-  return normalizedResult;
+  return {
+    result: normalizedResult,
+    session: payload.session || null,
+    screenshots: Array.isArray(payload.screenshots) ? payload.screenshots : [],
+    report: payload.report || null,
+  };
 }
 
 function hasRequiredAnalysisContract(value) {

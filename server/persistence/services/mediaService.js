@@ -53,6 +53,18 @@ export function createMediaService({ database, getContext, classificationService
     return screenshotView(ownScreenshot(id));
   }
 
+  function getReference(id) {
+    const media = findMediaById(database, id);
+    if (!media || media.userId !== context().userId) throw notFound("Media not found.");
+    if (media.deletedAt) {
+      return { ...media, linkedToTrade: Boolean(media.tradeId), unavailable: true, tags: [], categories: [] };
+    }
+    return {
+      ...screenshotView(media),
+      unavailable: mediaStorage ? !mediaStorage.exists(media.storageKey) : false,
+    };
+  }
+
   function validateStorageKey(value, field = "storageKey") {
     const key = requiredText(value, field, { maxLength: 1000 });
     if (key.includes("\0") || path.posix.isAbsolute(key) || path.win32.isAbsolute(key) || /^[\\/]/.test(key) || /^[A-Za-z]:[\\/]/.test(key) || key.split(/[\\/]+/).includes("..")) {
@@ -232,6 +244,17 @@ export function createMediaService({ database, getContext, classificationService
     return remove(id, expectedVersion);
   }
 
+  function discardUploadedScreenshot(id) {
+    const media = findMediaById(database, id);
+    if (!media || media.userId !== context().userId || media.source !== SCREENSHOT_SOURCE) return;
+    withTransaction(database, () => {
+      database.prepare("DELETE FROM media_tags WHERE mediaId = ?").run(id);
+      database.prepare("DELETE FROM media_categories WHERE mediaId = ?").run(id);
+      database.prepare("DELETE FROM media_assets WHERE id = ? AND userId = ? AND source = ?").run(id, context().userId, SCREENSHOT_SOURCE);
+    });
+    if (mediaStorage) mediaStorage.remove(media.storageKey);
+  }
+
   return {
     create,
     createUploadedScreenshot,
@@ -239,10 +262,12 @@ export function createMediaService({ database, getContext, classificationService
     listScreenshots,
     get,
     getScreenshot,
+    getReference,
     readScreenshot,
     update,
     updateScreenshot,
     remove,
     removeScreenshot,
+    discardUploadedScreenshot,
   };
 }

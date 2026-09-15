@@ -5926,6 +5926,111 @@ button {
   color: #8290a4;
   font-size: 12px;
 }
+.analyzer-session-discovery {
+  padding: 15px 17px;
+}
+.analyzer-session-discovery > strong,
+.analyzer-session-discovery > span {
+  display: block;
+}
+.analyzer-session-discovery > strong {
+  color: #223754;
+  font-size: 13px;
+}
+.analyzer-session-discovery > span {
+  margin-top: 4px;
+  color: #718097;
+  font-size: 11px;
+}
+.analyzer-session-discovery-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.analyzer-session-discovery-heading h2 {
+  margin: 0;
+  color: #223754;
+  font-size: 14px;
+}
+.analyzer-session-discovery-heading p {
+  margin: 4px 0 0;
+  color: #718097;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.analyzer-session-discovery button {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #d4e1f2;
+  border-radius: 5px;
+  color: #2766ce;
+  background: #f5f8ff;
+  font-size: 10px;
+  font-weight: 700;
+}
+.analyzer-session-discovery button:hover {
+  border-color: #9ebded;
+  background: #edf4ff;
+}
+.analyzer-session-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.analyzer-session-list > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #e1e8f2;
+  background: #fff;
+  text-align: left;
+}
+.analyzer-session-list > button:hover {
+  border-color: #9ebded;
+  background: #f7faff;
+}
+.analyzer-session-list > button span {
+  min-width: 0;
+}
+.analyzer-session-list > button strong,
+.analyzer-session-list > button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.analyzer-session-list > button strong {
+  color: #243653;
+  font-size: 11px;
+}
+.analyzer-session-list > button small {
+  margin-top: 3px;
+  color: #7b889b;
+  font-size: 9px;
+}
+.analyzer-session-list > button b {
+  flex: 0 0 auto;
+  color: #2766ce;
+  font-size: 10px;
+}
+.analyzer-session-inline-error {
+  display: block;
+  margin-top: 9px;
+  color: #bd3f46 !important;
+  font-size: 10px !important;
+  line-height: 1.4;
+}
+.analyzer-session-discovery-error {
+  border-color: #f2d6d6 !important;
+  background: #fffafa !important;
+}
+.analyzer-session-discovery-error button {
+  margin-top: 12px;
+}
 .results-heading {
   align-items: center;
   padding-bottom: 13px;
@@ -6898,6 +7003,9 @@ button {
   color: #21824a;
   font-size: 10px;
   font-weight: 700;
+}
+.analyzer-timeframe-chip span.unavailable {
+  color: #ad6b31;
 }
 .analyzer-timeframe-chip small {
   grid-column: 1 / -1;

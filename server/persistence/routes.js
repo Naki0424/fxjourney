@@ -135,8 +135,10 @@ export function createPersistenceRouter({ database, getContext, mediaStorage, up
   router.get("/analyzer/sessions/:sessionId/media", (request, response) => response.json({ media: analyzerService.listSessionMedia(request.params.sessionId) }));
   router.post("/analyzer/sessions/:sessionId/media", (request, response) => response.status(201).json({ media: analyzerService.attachSessionMedia(request.params.sessionId, request.body) }));
   router.delete("/analyzer/sessions/:sessionId/media/:mediaId", (request, response) => { analyzerService.detachSessionMedia(request.params.sessionId, request.params.mediaId, expectedVersion(request)); response.status(204).end(); });
+  router.get("/analyzer/sessions/:sessionId/state", (request, response) => response.json(analyzerService.getSessionState(request.params.sessionId)));
   router.get("/analyzer/sessions/:sessionId/reports", (request, response) => response.json({ reports: analyzerService.listReports(request.params.sessionId) }));
   router.get("/analyzer/sessions/:sessionId/reports/latest", (request, response) => response.json({ report: analyzerService.latestReport(request.params.sessionId) }));
+  router.get("/analyzer/sessions/:sessionId/reports/:versionOrId", (request, response) => response.json({ report: analyzerService.getReportForSession(request.params.sessionId, request.params.versionOrId) }));
   router.post("/analyzer/sessions/:sessionId/reports", (request, response) => response.status(201).json({ report: analyzerService.appendReport(request.params.sessionId, request.body) }));
   router.get("/analyzer/reports/:reportId", (request, response) => response.json({ report: analyzerService.getReport(request.params.reportId) }));
   router.get("/analyzer/reports/:reportId/feedback", (request, response) => response.json({ feedback: analyzerService.feedbackForReport(request.params.reportId) }));
@@ -176,6 +178,8 @@ export function createPersistenceRouter({ database, getContext, mediaStorage, up
     if (!error.scope) error.scope = "persistence";
     next(error);
   });
+
+  router.persistenceServices = { accountService, tradeService, classificationService, mediaService, journalService, analyzerService, goalService, habitService, reflectionService };
 
   return router;
 }

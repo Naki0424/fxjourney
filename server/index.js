@@ -56,12 +56,14 @@ app.use(cors({
   },
 }));
 app.use(express.json({ limit: "1mb" }));
-app.use("/api", createPersistenceRouter({
+const persistenceRouter = createPersistenceRouter({
   database: persistenceDatabase,
   getContext: () => localPersistenceContext,
   mediaStorage,
   uploadMiddleware: upload,
-}));
+});
+app.use("/api", persistenceRouter);
+const analyzerPersistenceService = persistenceRouter.persistenceServices.analyzerService;
 
 app.get("/api/health", (request, response) => {
   response.json({ ok: true, model: MODEL });
@@ -127,19 +129,64 @@ app.post("/api/analyze-chart", upload.array("images", MAX_SCREENSHOTS_PER_ANALYS
       return;
     }
 
+    if (request.body.sessionId !== undefined && typeof request.body.sessionId !== "string") {
+      response.status(400).json({ error: "sessionId must be a string." });
+      return;
+    }
+    const sessionId = request.body.sessionId?.trim() || null;
+    const persistedSession = sessionId ? analyzerPersistenceService.getSession(sessionId) : null;
+    const previousPersistedReport = persistedSession ? analyzerPersistenceService.latestReport(sessionId) : null;
+    const persistenceContext = {
+      ...context,
+      knownPair: persistedSession?.instrument || context.knownPair || null,
+      knownSession: persistedSession ? { id: persistedSession.id, status: persistedSession.status } : null,
+      continuation: Boolean(previousPersistedReport),
+      previousAnalysis: previousPersistedReport?.result || null,
+    };
+
     const ai = new GoogleGenAI({ apiKey: geminiApiKey });
     const { responseFromGemini, model } = await generateWithFallback({
       ai,
       screenshots: request.files,
       screenshotMetadata,
-      context,
+      context: persistenceContext,
     });
 
     const analysis = parseAnalysisResponse(responseFromGemini.text, screenshotMetadata);
     analysis.modelVersion = model;
     applyDeterministicRiskReward(analysis);
+    analysis.analyzedAt = new Date().toISOString();
+    const persisted = analyzerPersistenceService.persistSuccessfulAnalysis({
+      sessionId,
+      sessionFields: {
+        linkedTradeId: null,
+        instrument: analysis.marketContext?.instrument || context.knownPair || null,
+        primaryTimeframe: screenshotMetadata[0].timeframe,
+        context: {
+          providedTimeframes: screenshotMetadata.map((item) => item.timeframe),
+          continuation: Boolean(previousPersistedReport),
+        },
+      },
+      screenshotEntries: request.files.map((file, index) => ({
+        id: screenshotMetadata[index].id || null,
+        timeframe: screenshotMetadata[index].timeframe,
+        file,
+      })),
+      report: {
+        modelId: model,
+        analysisSchemaVersion: analysis.analysisVersion,
+        timeframesUsed: screenshotMetadata.map((item) => item.timeframe),
+        analyzedAt: analysis.analyzedAt,
+        result: analysis,
+      },
+    });
     developmentLog("Final validated server response", analysis);
-    response.json(analysis);
+    response.json({
+      ...persisted.report.result,
+      session: persisted.session,
+      screenshots: persisted.screenshots,
+      report: persisted.report,
+    });
   } catch (error) {
     next(error);
   }

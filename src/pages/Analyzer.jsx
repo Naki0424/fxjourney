@@ -8,7 +8,10 @@ import {
 } from "../data/mockData";
 import { navigate } from "../lib/navigation";
 import { analyzeScreenshot } from "../services/analyzerService";
+import { analysisPersistenceService } from "../services/analysisPersistenceService";
 import { analysisSteps, createAnalysisProgress } from "../services/analyzerProgress";
+import { screenshotService } from "../services/screenshotService";
+import { normalizeAnalysisResult } from "../utils/normalizeAnalysisResult";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const TIMEFRAME_OPTIONS = ["1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "Daily", "Weekly"];
@@ -48,6 +51,38 @@ function makeScreenshotEntry(uploadedFile, timeframe, id = "primary") {
     file: uploadedFile,
     addedAt: new Date().toISOString(),
   };
+}
+
+function makePersistedScreenshotEntry(membership, uploadedFile = null) {
+  return {
+    id: membership.mediaId,
+    timeframe: membership.timeframe,
+    file: uploadedFile,
+    addedAt: membership.addedAt,
+    unavailable: Boolean(membership.media?.unavailable) || !uploadedFile,
+  };
+}
+
+function normalizePersistedReport(report, previousReport, screenshots) {
+  const result = normalizeAnalysisResult(report.result || {});
+  return {
+    id: report.id,
+    version: report.versionNumber,
+    timeframes: Array.isArray(report.timeframesUsed) ? report.timeframesUsed : [],
+    modelVersion: report.modelId,
+    analyzedAt: report.analyzedAt,
+    result,
+    analysisChanges: buildAnalysisChanges(previousReport, result, screenshots),
+  };
+}
+
+async function loadPersistedScreenshot(membership) {
+  if (!membership?.media || membership.media.unavailable) return null;
+  const response = await fetch(screenshotService.contentUrl(membership.mediaId));
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  const file = new File([blob], membership.media.originalFilename || "chart.png", { type: membership.media.mimeType || blob.type || "image/png" });
+  return normalizeUploadedFile(file);
 }
 
 function getAvailableTimeframes(entries) {
@@ -355,7 +390,7 @@ function TimeframeContext({ screenshots, analysis, onAddChart }) {
           return (
             <div className="analyzer-timeframe-chip" key={screenshot.id}>
               <strong>{screenshot.timeframe}</strong>
-              <span>✓ Analyzed</span>
+              <span className={screenshot.unavailable ? "unavailable" : ""}>{screenshot.unavailable ? "Source unavailable" : "✓ Analyzed"}</span>
               {item?.summary && <small>{item.summary}</small>}
             </div>
           );
@@ -574,6 +609,36 @@ function EmptyResults({ hasFile, status }) {
       <div className="analyzer-placeholder-icon">✦</div>
       <h2>AI Analysis Results</h2>
       <p>{message}</p>
+    </Card>
+  );
+}
+
+function SessionDiscoveryPanel({ sessions, status, error, resumingSessionId, onResume, onStartNew }) {
+  if (status === "loading") {
+    return <Card className="analyzer-session-discovery"><strong>Loading saved analyses…</strong><span>Checking for resumable Analyzer sessions.</span></Card>;
+  }
+  if (status === "error") {
+    return <Card className="analyzer-session-discovery analyzer-session-discovery-error"><strong>Saved analyses unavailable</strong><span>{error || "Start a new analysis or try again later."}</span><button onClick={onStartNew}>Start New Analysis</button></Card>;
+  }
+  if (!sessions.length) return null;
+  return (
+    <Card className="analyzer-session-discovery">
+      <div className="analyzer-session-discovery-heading">
+        <div>
+          <h2>Continue an Analysis</h2>
+          <p>Resume a saved session or start a separate analysis with a new chart.</p>
+        </div>
+        <button onClick={onStartNew}>Start New</button>
+      </div>
+      <div className="analyzer-session-list">
+        {sessions.slice(0, 5).map((session) => (
+          <button key={session.id} onClick={() => onResume(session.id)} disabled={Boolean(resumingSessionId)}>
+            <span><strong>{session.instrument || "Chart Analysis"}</strong><small>{session.primaryTimeframe || "Timeframe pending"} · {session.status}</small></span>
+            <b>{resumingSessionId === session.id ? "Loading…" : "Resume →"}</b>
+          </button>
+        ))}
+      </div>
+      {error && <span className="analyzer-session-inline-error">{error}</span>}
     </Card>
   );
 }
@@ -1381,6 +1446,12 @@ function AnalyzerError({ error, onRetry, onReplace }) {
 
 export default function Analyzer() {
   const [file, setFile] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [availableSessions, setAvailableSessions] = useState([]);
+  const [sessionDiscoveryStatus, setSessionDiscoveryStatus] = useState("loading");
+  const [sessionDiscoveryError, setSessionDiscoveryError] = useState(null);
+  const [sessionResumeError, setSessionResumeError] = useState(null);
+  const [resumingSessionId, setResumingSessionId] = useState(null);
   const [selectedTimeframe, setSelectedTimeframe] = useState(DEFAULT_TIMEFRAME);
   const [sessionScreenshots, setSessionScreenshots] = useState([]);
   const [analysisStatus, setAnalysisStatus] = useState("idle");
@@ -1399,9 +1470,26 @@ export default function Analyzer() {
   const [recommendationSelections, setRecommendationSelections] = useState({});
   const [zoom, setZoom] = useState(1);
   const progressCleanupRef = useRef(null);
+  const analysisInFlightRef = useRef(false);
   const replaceInputRef = useRef(null);
   const requestedEntriesRef = useRef([]);
   const previewStateRef = useRef({ file: null, additionalFile: null, sessionScreenshots: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+    analysisPersistenceService.listSessions()
+      .then((payload) => {
+        if (cancelled) return;
+        setAvailableSessions(Array.isArray(payload?.sessions) ? payload.sessions : []);
+        setSessionDiscoveryStatus("ready");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSessionDiscoveryError(error.message);
+        setSessionDiscoveryStatus("error");
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     previewStateRef.current = { file, additionalFile, sessionScreenshots };
@@ -1437,6 +1525,7 @@ export default function Analyzer() {
     try {
       const normalizedFile = await normalizeUploadedFile(selectedFile);
       setFile(normalizedFile);
+      setSessionId(null);
       setSelectedTimeframe(DEFAULT_TIMEFRAME);
       setSessionScreenshots([]);
       requestedEntriesRef.current = [];
@@ -1460,7 +1549,8 @@ export default function Analyzer() {
   };
 
   const runAnalysis = async ({ screenshotsToAnalyze, continuation = false } = {}) => {
-    if (!file) return;
+    if (!file || analysisStatus === "analyzing" || analysisInFlightRef.current) return;
+    analysisInFlightRef.current = true;
     const entries = screenshotsToAnalyze?.length
       ? screenshotsToAnalyze
       : sessionScreenshots.length
@@ -1477,33 +1567,47 @@ export default function Analyzer() {
     setProgress(initialProgress());
     progressCleanupRef.current = createAnalysisProgress(setProgress);
     try {
-      const result = await analyzeScreenshot({
+      const analysisResponse = await analyzeScreenshot({
         file,
         screenshots: entries,
+        sessionId,
         context: {
           knownPair: null,
           knownTimeframe: entries.length === 1 ? entries[0].timeframe : null,
           knownSession: null,
-          linkedTradeId: organization.linkedTradeId,
+          linkedTradeId: null,
           providedTimeframes: entries.map((entry) => entry.timeframe),
           continuation: continuation || Boolean(previousReport),
           previousAnalysis: previousReport?.result || null,
         },
       });
+      const result = analysisResponse.result;
       progressCleanupRef.current?.();
       setProgress((current) => current.map((step) => ({ ...step, status: "complete" })));
+      const persistedReport = analysisResponse.report;
       const nextReport = {
-        version: reportVersions.length + 1,
-        timeframes: entries.map((entry) => entry.timeframe),
-        modelVersion: result.modelVersion,
-        analyzedAt: result.analyzedAt,
+        id: persistedReport?.id,
+        version: persistedReport?.versionNumber || reportVersions.length + 1,
+        timeframes: persistedReport?.timeframesUsed || entries.map((entry) => entry.timeframe),
+        modelVersion: persistedReport?.modelId || result.modelVersion,
+        analyzedAt: persistedReport?.analyzedAt || result.analyzedAt,
         result,
         analysisChanges: buildAnalysisChanges(previousReport, result, entries),
       };
-      setSessionScreenshots(entries);
+      const persistedScreenshots = analysisResponse.screenshots.length
+        ? analysisResponse.screenshots.map((membership, index) => makePersistedScreenshotEntry(membership, entries[index]?.file || null))
+        : entries;
+      setSessionId(analysisResponse.session?.id || sessionId);
+      setSessionScreenshots(persistedScreenshots);
       setReportVersions((current) => [...current, nextReport]);
       setCurrentVersionIndex(nextReport.version - 1);
       setAnalysis(result);
+      if (analysisResponse.session) {
+        setAvailableSessions((current) => [
+          analysisResponse.session,
+          ...current.filter((item) => item.id !== analysisResponse.session.id),
+        ]);
+      }
       if (isFirstAnalysis) {
         setOrganization((current) => ({
           ...current,
@@ -1519,6 +1623,8 @@ export default function Analyzer() {
       setProgress((current) => current.map((step) => step.status === "processing" ? { ...step, status: "error" } : step));
       setAnalysisError(error.message || "The analyzer returned an unexpected error.");
       setAnalysisStatus("error");
+    } finally {
+      analysisInFlightRef.current = false;
     }
   };
 
@@ -1574,9 +1680,49 @@ export default function Analyzer() {
     setRecommendationSelections((current) => ({ ...current, [style]: index }));
   };
 
+  const resumeSession = async (requestedSessionId) => {
+    if (analysisStatus === "analyzing") return;
+    setResumingSessionId(requestedSessionId);
+    setSessionResumeError(null);
+    setAnalysisError(null);
+    setUploadError(null);
+    setSessionDiscoveryError(null);
+    try {
+      const state = await analysisPersistenceService.getState(requestedSessionId);
+      const loadedFiles = await Promise.all(state.screenshots.map((membership) => loadPersistedScreenshot(membership)));
+      const entries = state.screenshots.map((membership, index) => makePersistedScreenshotEntry(membership, loadedFiles[index]));
+      const loadedReports = [];
+      state.reports.forEach((report) => {
+        loadedReports.push(normalizePersistedReport(report, loadedReports.at(-1) || null, entries));
+      });
+      setSessionId(state.session.id);
+      setSessionScreenshots(entries);
+      requestedEntriesRef.current = entries;
+      setFile(entries[0]?.file || null);
+      setSelectedTimeframe(entries[0]?.timeframe || DEFAULT_TIMEFRAME);
+      setReportVersions(loadedReports);
+      setCurrentVersionIndex(loadedReports.length ? loadedReports.length - 1 : -1);
+      setAnalysis(loadedReports.at(-1)?.result || null);
+      setAnalysisStatus(loadedReports.length ? "completed" : entries.length ? "ready" : "idle");
+      setProgress(loadedReports.length ? analysisSteps.map((label) => ({ label, status: "complete" })) : initialProgress());
+      setOrganization(initialOrganization());
+      setAnalysisFeedback(null);
+      setAddChartOpen(false);
+      setAdditionalFile(null);
+      setAdditionalUploadError(null);
+      setRecommendationSelections({});
+      setZoom(1);
+    } catch (error) {
+      setSessionResumeError(error.message || "The saved analysis could not be resumed.");
+    } finally {
+      setResumingSessionId(null);
+    }
+  };
+
   const resetAnalyzer = () => {
     progressCleanupRef.current?.();
     setFile(null);
+    setSessionId(null);
     setSelectedTimeframe(DEFAULT_TIMEFRAME);
     setSessionScreenshots([]);
     requestedEntriesRef.current = [];
@@ -1587,6 +1733,7 @@ export default function Analyzer() {
     setAnalysisError(null);
     setProgress(initialProgress());
     setOrganization(initialOrganization());
+    setSessionResumeError(null);
     setAnalysisFeedback(null);
     setUploadError(null);
     setAddChartOpen(false);
@@ -1598,7 +1745,7 @@ export default function Analyzer() {
   };
 
   const replaceImage = () => replaceInputRef.current?.click();
-  const stageHasResult = analysisStatus === "completed";
+  const stageHasResult = analysisStatus === "completed" && Boolean(analysis);
 
   return (
     <div className="analyzer-page">
@@ -1607,7 +1754,7 @@ export default function Analyzer() {
         onClose={() => navigate("/screenshots")}
       />
       <AnalyzerStepper analysisStatus={analysisStatus} />
-      {file && stageHasResult ? (
+      {stageHasResult ? (
         <CompletedAnalysisLayout
           file={file}
           analysisStatus={analysisStatus}
@@ -1665,6 +1812,16 @@ export default function Analyzer() {
           </div>
           <div className="analyzer-right-column">
             {!file && <EmptyResults hasFile={false} status={analysisStatus} />}
+            {!file && analysisStatus === "idle" && (
+              <SessionDiscoveryPanel
+                sessions={availableSessions}
+                status={sessionDiscoveryStatus}
+                error={sessionDiscoveryError || sessionResumeError}
+                resumingSessionId={resumingSessionId}
+                onResume={resumeSession}
+                onStartNew={resetAnalyzer}
+              />
+            )}
             {file && analysisStatus === "ready" && <EmptyResults hasFile status={analysisStatus} />}
             {file && analysisStatus === "analyzing" && <EmptyResults hasFile status={analysisStatus} />}
             {file && analysisStatus === "error" && <AnalyzerError error={analysisError} onRetry={runAnalysis} onReplace={replaceImage} />}
