@@ -95,6 +95,19 @@ export function createClassificationService({ database, getContext }) {
     });
   }
 
+  function ensureTag(name) {
+    const tagName = normalizeTagName(name);
+    const normalized = normalizedName(tagName);
+    const existing = findActiveTagByNormalizedName(database, context().userId, normalized);
+    if (existing) return existing;
+    const timestamp = nowUtc();
+    return insertTag(database, {
+      id: createId(), userId: context().userId, name: tagName, normalizedName: normalized,
+      createdAt: timestamp, updatedAt: timestamp, deletedAt: null, version: 1,
+      originDeviceId: context().deviceId, lastModifiedByDeviceId: context().deviceId,
+    });
+  }
+
   function updateTag(id, body, expectedVersion) {
     const source = assertRequestObject(body);
     const current = ownTag(id);
@@ -271,7 +284,7 @@ export function createClassificationService({ database, getContext }) {
   }
 
   return {
-    createTag, getTag: ownTag, listTags: () => listTagsByUserId(database, context().userId), updateTag, removeTag,
+    createTag, ensureTag, getTag: ownTag, listTags: () => listTagsByUserId(database, context().userId), updateTag, removeTag,
     createCategory, getCategory: ownCategory, listCategories: () => listCategoriesByUserId(database, context().userId), updateCategory, removeCategory,
     createFolder, getFolder: ownFolder, listFolders: () => listFoldersByUserId(database, context().userId), updateFolder, removeFolder,
     attachTradeTag, listTradeTags, detachTradeTag,

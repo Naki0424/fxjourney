@@ -9,6 +9,8 @@ import { openDatabase } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { createPersistenceRouter } from "./persistence/routes.js";
 import { bootstrapLocalInstallation } from "./persistence/services/bootstrapService.js";
+import { createMediaStorage } from "./persistence/mediaStorage.js";
+import { createMediaUploadMiddleware } from "./persistence/mediaUpload.js";
 
 const envPath = fileURLToPath(new URL("./.env", import.meta.url));
 dotenv.config({ path: envPath, override: true, quiet: true });
@@ -33,9 +35,7 @@ const FALLBACK_MODELS = uniqueModels([
 ]).filter((model) => model !== MODEL);
 const MAX_GEMINI_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1000;
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_SCREENSHOTS_PER_ANALYSIS = 10;
-const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/jpg"]);
 const MAIN_TREND_VALUES = new Set(["BULLISH", "BEARISH", "SIDEWAYS", "TRANSITIONAL", "UNCLEAR"]);
 const TREND_STRENGTH_VALUES = new Set(["WEAK", "MODERATE", "STRONG"]);
 const RECOMMENDATION_STYLE_VALUES = new Set(["SCALP", "INTRADAY", "SWING", "AI_OPPORTUNITY"]);
@@ -43,18 +43,8 @@ const RECOMMENDATION_ACTION_VALUES = new Set(["BUY", "SELL", "WAIT", "NO_TRADE"]
 const persistenceDatabase = openDatabase();
 runMigrations(persistenceDatabase);
 const localPersistenceContext = bootstrapLocalInstallation({ database: persistenceDatabase });
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_SIZE },
-  fileFilter: (request, file, callback) => {
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype.toLowerCase())) {
-      callback(new Error("Please upload a PNG, JPG, or JPEG screenshot."));
-      return;
-    }
-    callback(null, true);
-  },
-});
+const mediaStorage = createMediaStorage();
+const upload = createMediaUploadMiddleware();
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -69,6 +59,8 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/api", createPersistenceRouter({
   database: persistenceDatabase,
   getContext: () => localPersistenceContext,
+  mediaStorage,
+  uploadMiddleware: upload,
 }));
 
 app.get("/api/health", (request, response) => {

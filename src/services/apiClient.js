@@ -13,14 +13,15 @@ export class ApiError extends Error {
 }
 
 async function request(path, { method = "GET", body, signal, headers = {} } = {}) {
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   const response = await fetch(`${configuredBaseUrl}${path}`, {
     method,
     signal,
     headers: {
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(body === undefined || isFormData ? {} : { "Content-Type": "application/json" }),
       ...headers,
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : isFormData ? body : JSON.stringify(body),
   });
 
   const responseText = await response.text();

@@ -2,18 +2,55 @@ import path from "node:path";
 import { findTradeById } from "../repositories/tradeRepository.js";
 import { findJournalEntryById } from "../repositories/journalRepository.js";
 import { findMediaById, insertMedia, listMediaByUserId, softDeleteMediaByVersion, updateMediaByVersion } from "../repositories/mediaRepository.js";
+import { inspectImageBuffer } from "../mediaStorage.js";
 import { badRequest, conflict, notFound } from "../errors.js";
 import { assertRequestObject, booleanValue, createId, enumValue, integerValue, nowUtc, optionalText, parsePositiveVersion, requiredText, timestampValue, withTransaction } from "../utils.js";
 
 const AVAILABILITY_STATUSES = new Set(["AVAILABLE", "PENDING", "MISSING"]);
+// Schema v1 uses source to distinguish upload origin; UPLOAD is the existing convention for library images.
+const SCREENSHOT_SOURCE = "UPLOAD";
 
-export function createMediaService({ database, getContext, classificationService }) {
+function listValues(value, field) {
+  if (value === undefined || value === null || value === "") return [];
+  if (!Array.isArray(value)) throw badRequest(`${field} must be an array.`);
+  return [...new Set(value.map((item) => requiredText(item, field)))];
+}
+
+export function createMediaService({ database, getContext, classificationService, mediaStorage }) {
   const context = () => getContext();
 
   function ownMedia(id) {
     const media = findMediaById(database, id);
     if (!media || media.userId !== context().userId || media.deletedAt) throw notFound("Media not found.");
     return media;
+  }
+
+  function ownScreenshot(id) {
+    const media = ownMedia(id);
+    if (media.source !== SCREENSHOT_SOURCE) throw notFound("Screenshot not found.");
+    return media;
+  }
+
+  function screenshotView(media) {
+    const tags = classificationService.listMediaTags(media.id).map((relationship) => relationship.tag).filter(Boolean);
+    const categories = classificationService.listMediaCategories(media.id).map((relationship) => ({
+      ...relationship,
+      ...(relationship.category || {}),
+    })).filter((category) => category.id);
+    return {
+      ...media,
+      linkedToTrade: Boolean(media.tradeId),
+      tags,
+      categories,
+    };
+  }
+
+  function listScreenshots(filters = {}) {
+    return list({ ...filters, source: SCREENSHOT_SOURCE }).map(screenshotView);
+  }
+
+  function getScreenshot(id) {
+    return screenshotView(ownScreenshot(id));
   }
 
   function validateStorageKey(value, field = "storageKey") {
@@ -70,6 +107,79 @@ export function createMediaService({ database, getContext, classificationService
     });
   }
 
+  function createUploadedScreenshot({ file, metadata = {} }) {
+    if (!mediaStorage) throw badRequest("Media storage is not configured.");
+    const source = assertRequestObject(metadata);
+    const buffer = file?.buffer;
+    const inspected = inspectImageBuffer(buffer, {
+      mimeType: file?.mimetype,
+      originalFilename: file?.originalname,
+    });
+    const timestamp = nowUtc();
+    const id = createId();
+    const storageKey = `screenshots/${timestamp.slice(0, 4)}/${timestamp.slice(5, 7)}/${id}.${inspected.extension}`;
+    const tagIds = listValues(source.tagIds, "tagIds");
+    const categoryIds = listValues(source.categoryIds, "categoryIds");
+    const tagNames = listValues(source.tagNames, "tagNames");
+
+    tagIds.forEach((tagId) => classificationService.getTag(tagId));
+    categoryIds.forEach((categoryId) => classificationService.getCategory(categoryId));
+    const fields = normalizeFields({
+      ...source,
+      originalFilename: inspected.originalFilename,
+      mimeType: inspected.mimeType,
+      byteSize: buffer.length,
+      width: inspected.width,
+      height: inspected.height,
+      storageKey,
+      thumbnailKey: null,
+      checksumSha256: inspected.checksumSha256,
+      source: SCREENSHOT_SOURCE,
+      availabilityStatus: "AVAILABLE",
+    }, null, { create: true });
+
+    let stored = false;
+    try {
+      mediaStorage.store({ buffer, storageKey });
+      stored = true;
+      return withTransaction(database, () => {
+        const media = insertMedia(database, {
+          id,
+          userId: context().userId,
+          ...fields,
+          uploadedAt: timestamp,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          deletedAt: null,
+          version: 1,
+          originDeviceId: context().deviceId,
+          lastModifiedByDeviceId: context().deviceId,
+        });
+        const attachedTagIds = new Set();
+        tagIds.forEach((tagId) => {
+          classificationService.attachMediaTag(id, tagId);
+          attachedTagIds.add(tagId);
+        });
+        tagNames.forEach((tagName) => {
+          const tag = classificationService.ensureTag(tagName);
+          if (!attachedTagIds.has(tag.id)) {
+            classificationService.attachMediaTag(id, tag.id);
+            attachedTagIds.add(tag.id);
+          }
+        });
+        categoryIds.forEach((categoryId) => classificationService.attachMediaCategory(id, {
+          categoryId,
+          source: "USER",
+          confirmed: true,
+        }));
+        return screenshotView(media);
+      });
+    } catch (error) {
+      if (stored) mediaStorage.remove(storageKey);
+      throw error;
+    }
+  }
+
   function list(filters = {}) {
     if (filters && typeof filters === "object" && !Array.isArray(filters)) {
       const normalized = { ...filters };
@@ -81,6 +191,14 @@ export function createMediaService({ database, getContext, classificationService
   }
 
   function get(id) { return ownMedia(id); }
+
+  function readScreenshot(id) {
+    if (!mediaStorage) throw badRequest("Media storage is not configured.");
+    const media = ownScreenshot(id);
+    const buffer = mediaStorage.read(media.storageKey);
+    if (!buffer) throw notFound("Screenshot file is missing.");
+    return { media, buffer };
+  }
 
   function update(id, body, expectedVersion) {
     const source = assertRequestObject(body);
@@ -99,5 +217,32 @@ export function createMediaService({ database, getContext, classificationService
     return deleted;
   }
 
-  return { create, list, get, update, remove };
+  function updateScreenshot(id, body, expectedVersion) {
+    ownScreenshot(id);
+    const source = assertRequestObject(body);
+    const mutableFields = ["tradeId", "journalEntryId", "folderId", "originalFilename", "capturedAt", "favorite"];
+    const unsupportedFields = Object.keys(source).filter((field) => field !== "expectedVersion" && field !== "version" && !mutableFields.includes(field));
+    if (unsupportedFields.length) throw badRequest(`Screenshot field cannot be updated: ${unsupportedFields[0]}.`);
+    const fields = Object.fromEntries(mutableFields.filter((field) => Object.prototype.hasOwnProperty.call(source, field)).map((field) => [field, source[field]]));
+    return screenshotView(update(id, fields, expectedVersion));
+  }
+
+  function removeScreenshot(id, expectedVersion) {
+    ownScreenshot(id);
+    return remove(id, expectedVersion);
+  }
+
+  return {
+    create,
+    createUploadedScreenshot,
+    list,
+    listScreenshots,
+    get,
+    getScreenshot,
+    readScreenshot,
+    update,
+    updateScreenshot,
+    remove,
+    removeScreenshot,
+  };
 }

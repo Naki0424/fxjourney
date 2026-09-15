@@ -10,12 +10,12 @@ import { createJournalService } from "./services/journalService.js";
 import { createMediaService } from "./services/mediaService.js";
 import { createReflectionService } from "./services/reflectionService.js";
 
-export function createPersistenceRouter({ database, getContext }) {
+export function createPersistenceRouter({ database, getContext, mediaStorage, uploadMiddleware }) {
   const router = express.Router();
   const accountService = createAccountService({ database, getContext });
   const tradeService = createTradeService({ database, getContext });
   const classificationService = createClassificationService({ database, getContext });
-  const mediaService = createMediaService({ database, getContext, classificationService });
+  const mediaService = createMediaService({ database, getContext, classificationService, mediaStorage });
   const journalService = createJournalService({ database, getContext, classificationService });
   const analyzerService = createAnalyzerPersistenceService({ database, getContext, mediaService });
   const goalService = createGoalService({ database, getContext });
@@ -97,6 +97,25 @@ export function createPersistenceRouter({ database, getContext }) {
   router.patch("/media/:id", (request, response) => response.json({ media: mediaService.update(request.params.id, request.body, expectedVersion(request)) }));
   router.delete("/media/:id", (request, response) => { mediaService.remove(request.params.id, expectedVersion(request)); response.status(204).end(); });
 
+  router.get("/screenshots", (request, response) => response.json({ screenshots: mediaService.listScreenshots(request.query) }));
+  router.get("/screenshots/:id/content", (request, response) => {
+    const { media, buffer } = mediaService.readScreenshot(request.params.id);
+    response.set("Content-Type", media.mimeType);
+    response.set("Content-Length", String(buffer.length));
+    response.set("Cache-Control", "private, max-age=3600");
+    response.send(buffer);
+  });
+  router.get("/screenshots/:id", (request, response) => response.json({ screenshot: mediaService.getScreenshot(request.params.id) }));
+  router.patch("/screenshots/:id", (request, response) => response.json({ screenshot: mediaService.updateScreenshot(request.params.id, request.body, expectedVersion(request)) }));
+  router.delete("/screenshots/:id", (request, response) => { mediaService.removeScreenshot(request.params.id, expectedVersion(request)); response.status(204).end(); });
+  if (uploadMiddleware) {
+    router.post("/screenshots", uploadMiddleware.single("file"), (request, response) => {
+      if (!request.file) throw badRequest("A screenshot file is required.");
+      const metadata = parseUploadMetadata(request.body?.metadata);
+      response.status(201).json({ screenshot: mediaService.createUploadedScreenshot({ file: request.file, metadata }) });
+    });
+  }
+
   router.get("/trades/:tradeId/tags", (request, response) => response.json({ tags: classificationService.listTradeTags(request.params.tradeId) }));
   router.post("/trades/:tradeId/tags", (request, response) => response.status(201).json({ tag: classificationService.attachTradeTag(request.params.tradeId, request.body?.tagId) }));
   router.delete("/trades/:tradeId/tags/:tagId", (request, response) => { classificationService.detachTradeTag(request.params.tradeId, request.params.tagId, expectedVersion(request)); response.status(204).end(); });
@@ -159,6 +178,18 @@ export function createPersistenceRouter({ database, getContext }) {
   });
 
   return router;
+}
+
+function parseUploadMetadata(value) {
+  if (value === undefined || value === null || value === "") return {};
+  if (typeof value !== "string") throw badRequest("Screenshot metadata must be valid JSON.");
+  try {
+    const metadata = JSON.parse(value);
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw new Error("not an object");
+    return metadata;
+  } catch {
+    throw badRequest("Screenshot metadata must be valid JSON.");
+  }
 }
 
 function expectedVersion(request) {
