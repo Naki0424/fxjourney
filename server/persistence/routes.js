@@ -9,11 +9,13 @@ import { createHabitService } from "./services/habitService.js";
 import { createJournalService } from "./services/journalService.js";
 import { createMediaService } from "./services/mediaService.js";
 import { createReflectionService } from "./services/reflectionService.js";
+import { createSyncService } from "./syncService.js";
 
 export function createPersistenceRouter({ database, getContext, mediaStorage, uploadMiddleware }) {
   const router = express.Router();
-  const accountService = createAccountService({ database, getContext });
-  const tradeService = createTradeService({ database, getContext });
+  const syncService = createSyncService({ database, getContext });
+  const accountService = createAccountService({ database, getContext, syncService });
+  const tradeService = createTradeService({ database, getContext, syncService });
   const classificationService = createClassificationService({ database, getContext });
   const mediaService = createMediaService({ database, getContext, classificationService, mediaStorage });
   const journalService = createJournalService({ database, getContext, classificationService });
@@ -179,7 +181,7 @@ export function createPersistenceRouter({ database, getContext, mediaStorage, up
     next(error);
   });
 
-  router.persistenceServices = { accountService, tradeService, classificationService, mediaService, journalService, analyzerService, goalService, habitService, reflectionService };
+  router.persistenceServices = { accountService, tradeService, syncService, classificationService, mediaService, journalService, analyzerService, goalService, habitService, reflectionService };
 
   return router;
 }

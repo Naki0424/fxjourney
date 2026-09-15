@@ -2,13 +2,16 @@ import { findAccountById } from "../repositories/accountRepository.js";
 import { findTradeById, insertTrade, listTradesByUserId, softDeleteTradeByVersion, updateTradeByVersion } from "../repositories/tradeRepository.js";
 import { badRequest, conflict, notFound } from "../errors.js";
 import { assertRequestObject, createId, decimalString, enumValue, integerValue, jsonValue, nowUtc, optionalText, parsePositiveVersion, requiredText, timestampValue, withTransaction } from "../utils.js";
+import { createSyncService } from "../syncService.js";
 
 const DIRECTIONS = new Set(["BUY", "SELL"]);
 const STATUSES = new Set(["DRAFT", "OPEN", "CLOSED", "CANCELLED"]);
 const OUTCOMES = new Set(["WIN", "LOSS", "BREAKEVEN", "UNRESOLVED"]);
 const PLAN_ADHERENCE = new Set(["FOLLOWED", "PARTIAL", "BROKE_PLAN", "NOT_RATED"]);
 
-export function createTradeService({ database, getContext }) {
+export function createTradeService({ database, getContext, syncService } = {}) {
+  const synchronization = syncService || createSyncService({ database, getContext });
+
   function context() {
     return getContext();
   }
@@ -92,7 +95,7 @@ export function createTradeService({ database, getContext }) {
     const timestamp = nowUtc();
     return withTransaction(database, () => {
       validateAccount(fields.accountId);
-      return insertTrade(database, {
+      const created = insertTrade(database, {
         id: createId(),
         userId: localContext.userId,
         ...fields,
@@ -103,6 +106,8 @@ export function createTradeService({ database, getContext }) {
         originDeviceId: localContext.deviceId,
         lastModifiedByDeviceId: localContext.deviceId,
       });
+      synchronization.recordLocalMutation({ entityType: "TRADE", operation: "CREATE", after: created });
+      return created;
     });
   }
 
@@ -141,6 +146,7 @@ export function createTradeService({ database, getContext }) {
         lastModifiedByDeviceId: context().deviceId,
       }, version);
       if (!updated) throw conflict("The trade was changed by another operation.", "STALE_VERSION");
+      synchronization.recordLocalMutation({ entityType: "TRADE", operation: "UPDATE", before: current, after: updated });
       return updated;
     });
   }
@@ -149,15 +155,18 @@ export function createTradeService({ database, getContext }) {
     const current = ownedTrade(id);
     const version = parsePositiveVersion(expectedVersion);
     const timestamp = nowUtc();
-    const deleted = softDeleteTradeByVersion(database, {
-      id: current.id,
-      userId: current.userId,
-      deletedAt: timestamp,
-      updatedAt: timestamp,
-      deviceId: context().deviceId,
-    }, version);
-    if (!deleted) throw conflict("The trade was changed by another operation.", "STALE_VERSION");
-    return deleted;
+    return withTransaction(database, () => {
+      const deleted = softDeleteTradeByVersion(database, {
+        id: current.id,
+        userId: current.userId,
+        deletedAt: timestamp,
+        updatedAt: timestamp,
+        deviceId: context().deviceId,
+      }, version);
+      if (!deleted) throw conflict("The trade was changed by another operation.", "STALE_VERSION");
+      synchronization.recordLocalMutation({ entityType: "TRADE", operation: "DELETE", before: current, after: deleted });
+      return deleted;
+    });
   }
 
   return { create, list, get, update, remove };

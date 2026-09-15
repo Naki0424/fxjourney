@@ -133,6 +133,31 @@ export function updateTradeByVersion(database, trade, expectedVersion) {
   return result.changes === 1 ? findTradeById(database, trade.id) : null;
 }
 
+// Sync applies an already-versioned canonical snapshot. It deliberately
+// preserves the origin and resulting version from the source device.
+export function applyTradeSnapshot(database, trade) {
+  const values = databaseTradeValues(trade);
+  const result = database.prepare(`
+    UPDATE trades SET
+      accountId = @accountId, instrument = @instrument, direction = @direction,
+      status = @status, outcome = @outcome, openedAt = @openedAt,
+      closedAt = @closedAt, entryPrice = @entryPrice, exitPrice = @exitPrice,
+      stopLossPrice = @stopLossPrice, takeProfitTargetsJson = @takeProfitTargetsJson,
+      quantityLots = @quantityLots, accountEquityAtEntryMinor = @accountEquityAtEntryMinor,
+      riskAmountMinor = @riskAmountMinor, riskPercent = @riskPercent,
+      pnlAmountMinor = @pnlAmountMinor, setupType = @setupType,
+      confluenceJson = @confluenceJson, tradePlanJson = @tradePlanJson,
+      emotionBefore = @emotionBefore, emotionDuring = @emotionDuring,
+      emotionAfter = @emotionAfter, emotionsJson = @emotionsJson,
+      reviewJson = @reviewJson, notes = @notes, rating = @rating,
+      planAdherence = @planAdherence, createdAt = @createdAt,
+      updatedAt = @updatedAt, deletedAt = @deletedAt, version = @version,
+      originDeviceId = @originDeviceId, lastModifiedByDeviceId = @lastModifiedByDeviceId
+    WHERE id = @id AND userId = @userId
+  `).run(values);
+  return result.changes === 1 ? findTradeById(database, trade.id) : null;
+}
+
 export function softDeleteTradeByVersion(database, { id, userId, deletedAt, updatedAt, deviceId }, expectedVersion) {
   const result = database.prepare(`
     UPDATE trades SET

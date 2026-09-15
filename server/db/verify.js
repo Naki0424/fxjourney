@@ -33,6 +33,9 @@ const requiredTables = [
   "sync_changes",
   "sync_state",
   "sync_conflicts",
+  "sync_device_sequences",
+  "sync_change_receipts",
+  "sync_pending_changes",
 ];
 
 function assert(condition, message) {
@@ -98,7 +101,7 @@ function runVerification() {
 
   try {
     const firstRun = runMigrations(database);
-    assert(firstRun.applied.length === 1 && firstRun.applied[0] === "001", "Migration 001 was not applied exactly once on a fresh DB.");
+    assert(JSON.stringify(firstRun.applied) === JSON.stringify(["001", "002"]), "Schema migrations were not applied in order on a fresh DB.");
 
     const tables = tableNames(database);
     assert(tables.length === requiredTables.length, "Expected " + requiredTables.length + " tables, found " + tables.length + ".");
@@ -106,16 +109,17 @@ function runVerification() {
       assert(tables.includes(table), "Missing required table: " + table);
     }
 
-    const migrationRow = database.prepare("SELECT version, appliedAt FROM schema_migrations").get();
-    assert(migrationRow?.version === "001" && migrationRow.appliedAt, "schema_migrations does not contain migration 001.");
+    const migrationRows = database.prepare("SELECT version, appliedAt FROM schema_migrations ORDER BY version").all();
+    assert(JSON.stringify(migrationRows.map((row) => row.version)) === JSON.stringify(["001", "002"]), "schema_migrations does not contain both ordered migrations.");
+    assert(migrationRows.every((row) => row.appliedAt), "schema_migrations contains an incomplete migration record.");
 
     assert(Number(database.pragma("foreign_keys", { simple: true })) === 1, "PRAGMA foreign_keys is not enabled.");
 
     const initialSnapshot = JSON.stringify(schemaSnapshot(database));
     const secondRun = runMigrations(database);
     assert(secondRun.applied.length === 0, "Rerunning migrations applied a migration.");
-    assert(secondRun.skipped.length === 1 && secondRun.skipped[0] === "001", "Rerunning migrations did not skip migration 001.");
-    assert(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count === 1, "Migration record was duplicated.");
+    assert(JSON.stringify(secondRun.skipped) === JSON.stringify(["001", "002"]), "Rerunning migrations did not skip all applied migrations.");
+    assert(database.prepare("SELECT COUNT(*) AS count FROM schema_migrations").get().count === 2, "Migration records were duplicated.");
     assert(JSON.stringify(schemaSnapshot(database)) === initialSnapshot, "Rerunning migrations changed the schema.");
 
     const now = "2026-09-13T00:00:00.000Z";
@@ -255,6 +259,9 @@ function runVerification() {
       ["sync_changes", ["changeId"], true],
       ["sync_changes", ["originDeviceId", "originSeq"], true],
       ["sync_changes", ["entityType", "entityId"]],
+      ["sync_change_receipts", ["status"]],
+      ["sync_pending_changes", ["dependencyEntityType", "dependencyEntityId"]],
+      ["sync_conflicts", ["localChangeId", "remoteChangeId"]],
       ["sync_conflicts", ["status"]],
       ["sync_conflicts", ["entityType", "entityId"]],
     ];
@@ -264,7 +271,7 @@ function runVerification() {
 
     return {
       tables: tables.length,
-      migration: "001",
+      migration: "001 + 002",
       idempotent: true,
       foreignKeys: true,
       databasePath,

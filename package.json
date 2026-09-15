@@ -11,6 +11,7 @@
     "persistence:verify": "node server/persistence/verify.js && node server/persistence/verifyPhase2.js",
     "media:verify": "node server/persistence/verifyMedia.js",
     "analyzer:verify": "node server/persistence/verifyAnalyzerPersistence.js",
+    "sync:verify": "node server/persistence/verifySync.js",
     "build": "vite build",
     "preview": "vite preview"
   },

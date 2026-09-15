@@ -70,6 +70,36 @@ export function updateAccountByVersion(database, account, expectedVersion) {
   return result.changes === 1 ? findAccountById(database, account.id) : null;
 }
 
+// Sync applies an already-versioned canonical snapshot. It must not increment
+// the incoming version as though the receiver authored a new local mutation.
+export function applyAccountSnapshot(database, account) {
+  const result = database.prepare(`
+    UPDATE accounts SET
+      name = ?, brokerName = ?, accountType = ?, currencyCode = ?,
+      currencyMinorDigits = ?, initialBalanceMinor = ?, active = ?,
+      createdAt = ?, updatedAt = ?, deletedAt = ?, version = ?,
+      originDeviceId = ?, lastModifiedByDeviceId = ?
+    WHERE id = ? AND userId = ?
+  `).run(
+    account.name,
+    account.brokerName,
+    account.accountType,
+    account.currencyCode,
+    account.currencyMinorDigits,
+    account.initialBalanceMinor,
+    account.active ? 1 : 0,
+    account.createdAt,
+    account.updatedAt,
+    account.deletedAt,
+    account.version,
+    account.originDeviceId,
+    account.lastModifiedByDeviceId,
+    account.id,
+    account.userId,
+  );
+  return result.changes === 1 ? findAccountById(database, account.id) : null;
+}
+
 export function softDeleteAccountByVersion(database, { id, userId, deletedAt, updatedAt, deviceId }, expectedVersion) {
   const result = database.prepare(`
     UPDATE accounts SET

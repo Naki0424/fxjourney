@@ -1,10 +1,13 @@
 import { findAccountById, hasAnyTrades, insertAccount, listActiveAccountsByUserId, softDeleteAccountByVersion, updateAccountByVersion } from "../repositories/accountRepository.js";
 import { badRequest, conflict, notFound } from "../errors.js";
 import { assertRequestObject, booleanValue, createId, integerValue, nowUtc, optionalText, parsePositiveVersion, requiredText, withTransaction } from "../utils.js";
+import { createSyncService } from "../syncService.js";
 
 const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
 
-export function createAccountService({ database, getContext }) {
+export function createAccountService({ database, getContext, syncService } = {}) {
+  const synchronization = syncService || createSyncService({ database, getContext });
+
   function context() {
     return getContext();
   }
@@ -51,7 +54,11 @@ export function createAccountService({ database, getContext }) {
       originDeviceId: localContext.deviceId,
       lastModifiedByDeviceId: localContext.deviceId,
     };
-    return insertAccount(database, account);
+    return withTransaction(database, () => {
+      const created = insertAccount(database, account);
+      synchronization.recordLocalMutation({ entityType: "ACCOUNT", operation: "CREATE", after: created });
+      return created;
+    });
   }
 
   function list() {
@@ -85,6 +92,7 @@ export function createAccountService({ database, getContext }) {
         lastModifiedByDeviceId: context().deviceId,
       }, version);
       if (!updated) throw conflict("The account was changed by another operation.", "STALE_VERSION");
+      synchronization.recordLocalMutation({ entityType: "ACCOUNT", operation: "UPDATE", before: current, after: updated });
       return updated;
     });
   }
@@ -93,15 +101,18 @@ export function createAccountService({ database, getContext }) {
     const current = ownedAccount(id, { includeInactive: false });
     const version = parsePositiveVersion(expectedVersion);
     const timestamp = nowUtc();
-    const deleted = softDeleteAccountByVersion(database, {
-      id: current.id,
-      userId: current.userId,
-      deletedAt: timestamp,
-      updatedAt: timestamp,
-      deviceId: context().deviceId,
-    }, version);
-    if (!deleted) throw conflict("The account was changed by another operation.", "STALE_VERSION");
-    return deleted;
+    return withTransaction(database, () => {
+      const deleted = softDeleteAccountByVersion(database, {
+        id: current.id,
+        userId: current.userId,
+        deletedAt: timestamp,
+        updatedAt: timestamp,
+        deviceId: context().deviceId,
+      }, version);
+      if (!deleted) throw conflict("The account was changed by another operation.", "STALE_VERSION");
+      synchronization.recordLocalMutation({ entityType: "ACCOUNT", operation: "DELETE", before: current, after: deleted });
+      return deleted;
+    });
   }
 
   return { create, list, get, update, remove };
