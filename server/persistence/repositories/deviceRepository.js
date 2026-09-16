@@ -50,6 +50,27 @@ export function updateDeviceAuthentication(database, deviceId, authentication) {
   return findDeviceById(database, deviceId);
 }
 
+export function trustDeviceAuthentication(database, deviceId, authentication, trustedAt) {
+  database.prepare(`
+    UPDATE devices SET
+      authAlgorithm = ?, authPublicKey = ?, authKeyFingerprint = ?, trustedAt = ?, lastSeenAt = ?
+    WHERE id = ?
+  `).run(
+    authentication.algorithm,
+    authentication.publicKeySpki,
+    authentication.fingerprint,
+    trustedAt,
+    trustedAt,
+    deviceId,
+  );
+  return findDeviceById(database, deviceId);
+}
+
+export function updateDeviceWorkspace(database, deviceId, userId) {
+  database.prepare("UPDATE devices SET userId = ? WHERE id = ?").run(userId, deviceId);
+  return findDeviceById(database, deviceId);
+}
+
 export function touchDevice(database, id, lastSeenAt) {
   database.prepare("UPDATE devices SET lastSeenAt = ? WHERE id = ? AND retiredAt IS NULL").run(lastSeenAt, id);
   return findDeviceById(database, id);

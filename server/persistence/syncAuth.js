@@ -49,6 +49,30 @@ export function normalizeDeviceAuthentication(authentication) {
   };
 }
 
+export function normalizePublicDeviceAuthentication(authentication) {
+  if (!authentication || typeof authentication !== "object" || authentication.privateKeyPkcs8) {
+    throw new Error("Only public device authentication metadata may be provided.");
+  }
+  if (authentication.algorithm !== SYNC_AUTH_ALGORITHM || typeof authentication.publicKeySpki !== "string") {
+    throw new Error("Unsupported or incomplete device authentication metadata.");
+  }
+  const publicKey = createPublicKey({
+    key: Buffer.from(authentication.publicKeySpki, "base64"),
+    format: "der",
+    type: "spki",
+  });
+  const publicKeySpki = publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  const derivedFingerprint = fingerprint(publicKeySpki);
+  if (authentication.fingerprint !== derivedFingerprint) {
+    throw new Error("Device authentication fingerprint is inconsistent.");
+  }
+  return {
+    algorithm: SYNC_AUTH_ALGORITHM,
+    publicKeySpki,
+    fingerprint: derivedFingerprint,
+  };
+}
+
 export function fingerprint(publicKeySpki) {
   return createHash("sha256").update(Buffer.from(publicKeySpki, "base64")).digest("hex");
 }

@@ -6,8 +6,7 @@ import {
   SYNC_TRANSPORT_CAPABILITIES,
   SYNC_TRANSPORT_SCHEMA_VERSION,
 } from "./syncTransport.js";
-
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+import { LOOPBACK_HOSTS, assertSyncPeerUrl, normalizeHost } from "./syncEndpoints.js";
 
 export class SyncTransportClientError extends Error {
   constructor(code, message, { status = null, offline = false } = {}) {
@@ -26,7 +25,7 @@ export function assertLoopbackPeerUrl(peerUrl) {
   } catch {
     throw new SyncTransportClientError("INVALID_PEER_URL", "The configured sync peer URL is invalid.");
   }
-  if (parsed.protocol !== "http:" || !LOOPBACK_HOSTS.has(parsed.hostname) || parsed.username || parsed.password) {
+  if (parsed.protocol !== "http:" || !LOOPBACK_HOSTS.has(normalizeHost(parsed.hostname)) || parsed.username || parsed.password) {
     throw new SyncTransportClientError("INVALID_PEER_URL", "Sync transport is restricted to an explicit loopback HTTP peer.");
   }
   return parsed;
@@ -56,8 +55,13 @@ export function createSignedRequestHeaders({ identity, method, path, rawBody = B
   };
 }
 
-export function createSyncTransportClient({ peerUrl, identity, timeoutMs = 10_000, fetchImpl = globalThis.fetch } = {}) {
-  const peer = assertLoopbackPeerUrl(peerUrl);
+export function createSyncTransportClient({ peerUrl, identity, allowedHosts, timeoutMs = 10_000, fetchImpl = globalThis.fetch } = {}) {
+  let peer;
+  try {
+    peer = assertSyncPeerUrl(peerUrl, { allowedHosts });
+  } catch (error) {
+    throw new SyncTransportClientError(error.code || "INVALID_PEER_URL", error.message);
+  }
   if (typeof fetchImpl !== "function") throw new SyncTransportClientError("HTTP_UNAVAILABLE", "The HTTP client is unavailable.");
 
   async function request(method, requestPath, body) {
@@ -68,8 +72,8 @@ export function createSyncTransportClient({ peerUrl, identity, timeoutMs = 10_00
       ...(body === undefined ? {} : { "content-type": "application/json", "content-length": String(rawBody.length) }),
     };
     const target = new URL(requestPath, peer);
-    if (!LOOPBACK_HOSTS.has(target.hostname) || target.protocol !== "http:") {
-      throw new SyncTransportClientError("INVALID_PEER_URL", "Sync transport is restricted to the configured loopback peer.");
+    if (target.origin !== peer.origin || target.protocol !== "http:") {
+      throw new SyncTransportClientError("INVALID_PEER_URL", "Sync transport is restricted to the configured private peer.");
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -126,10 +130,10 @@ export function createSyncTransportClient({ peerUrl, identity, timeoutMs = 10_00
   };
 }
 
-export function createSyncTransportOrchestrator({ database, getContext, syncService, identity, peerUrl, peerDeviceId, timeoutMs, fetchImpl, limits = {} } = {}) {
+export function createSyncTransportOrchestrator({ database, getContext, syncService, identity, peerUrl, peerDeviceId, allowedHosts, timeoutMs, fetchImpl, limits = {} } = {}) {
   const configuredLimits = { ...DEFAULT_SYNC_TRANSPORT_LIMITS, ...limits };
   const localIdentity = { ...identity, deviceId: identity?.deviceId || getContext().deviceId };
-  const client = createSyncTransportClient({ peerUrl, identity: localIdentity, timeoutMs, fetchImpl });
+  const client = createSyncTransportClient({ peerUrl, identity: localIdentity, allowedHosts, timeoutMs, fetchImpl });
 
   async function pushLocalChanges() {
     const local = getContext();

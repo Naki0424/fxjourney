@@ -31,3 +31,4 @@ secrets/
 *.token
 *.pem
 *.key
+*.pairing-pending.json

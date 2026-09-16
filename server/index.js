@@ -12,6 +12,7 @@ import { bootstrapLocalInstallation } from "./persistence/services/bootstrapServ
 import { createMediaStorage } from "./persistence/mediaStorage.js";
 import { createMediaUploadMiddleware } from "./persistence/mediaUpload.js";
 import { captureSyncRequestBody } from "./persistence/syncTransport.js";
+import { resolveServerBindHost } from "./persistence/syncEndpoints.js";
 
 const envPath = fileURLToPath(new URL("./.env", import.meta.url));
 dotenv.config({ path: envPath, override: true, quiet: true });
@@ -21,6 +22,7 @@ console.log(`Gemini API key loaded: ${Boolean(geminiApiKey)}`);
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
+const HOST = resolveServerBindHost();
 const DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
 const allowedCorsOrigins = new Set([
   ...DEFAULT_CORS_ORIGINS,
@@ -720,6 +722,6 @@ app.use((error, request, response, next) => {
   response.status(mapped.status).json({ error: mapped.message });
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`FXJourney Analyzer server listening on http://127.0.0.1:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`FXJourney Analyzer server listening on http://${HOST}:${PORT}`);
 });

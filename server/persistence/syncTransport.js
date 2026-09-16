@@ -26,7 +26,7 @@ export const DEFAULT_SYNC_TRANSPORT_LIMITS = Object.freeze({
 });
 
 export function captureSyncRequestBody(request, response, buffer) {
-  if (request.originalUrl?.startsWith("/api/sync")) {
+  if (request.originalUrl?.startsWith("/api/sync") || request.originalUrl?.startsWith("/api/pairing")) {
     request.rawBody = Buffer.from(buffer);
   }
 }

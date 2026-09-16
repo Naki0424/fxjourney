@@ -13,6 +13,9 @@
     "analyzer:verify": "node server/persistence/verifyAnalyzerPersistence.js",
     "sync:verify": "node server/persistence/verifySync.js",
     "sync:transport:verify": "node server/persistence/verifySyncTransport.js",
+    "sync:pairing:verify": "node server/persistence/verifyPairing.js",
+    "sync:peer": "node server/persistence/syncPeerCommand.js",
+    "pairing": "node server/persistence/pairingCommand.js",
     "build": "vite build",
     "preview": "vite preview"
   },

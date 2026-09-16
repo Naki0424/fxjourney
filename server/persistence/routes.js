@@ -11,8 +11,10 @@ import { createMediaService } from "./services/mediaService.js";
 import { createReflectionService } from "./services/reflectionService.js";
 import { createSyncService } from "./syncService.js";
 import { createSyncTransportRouter } from "./syncTransport.js";
+import { createPairingRouter } from "./pairingRouter.js";
+import { parseAllowedSyncHosts } from "./syncEndpoints.js";
 
-export function createPersistenceRouter({ database, getContext, mediaStorage, uploadMiddleware }) {
+export function createPersistenceRouter({ database, getContext, mediaStorage, uploadMiddleware, syncAllowedHosts = parseAllowedSyncHosts() }) {
   const router = express.Router();
   const syncService = createSyncService({ database, getContext });
   const accountService = createAccountService({ database, getContext, syncService });
@@ -24,6 +26,7 @@ export function createPersistenceRouter({ database, getContext, mediaStorage, up
   const goalService = createGoalService({ database, getContext });
   const habitService = createHabitService({ database, getContext });
   const reflectionService = createReflectionService({ database, getContext });
+  router.use("/pairing", createPairingRouter({ database, getContext, allowedHosts: syncAllowedHosts }));
   router.use("/sync", createSyncTransportRouter({ database, getContext, syncService }));
 
   router.get("/bootstrap", (request, response) => {
